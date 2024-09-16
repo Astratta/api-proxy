@@ -20,7 +20,7 @@ def _pagination_handler(request: Callable):
             limit = kwargs["params"][pagination["fields"][1]]
 
             while exhaust:
-                r = await request(*args, **kwargs)
+                r = await request(self, endpoint, method, **kwargs)
                 for key in r.keys():
                     if key == "total":
                         continue
