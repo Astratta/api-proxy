@@ -1,18 +1,18 @@
 import json
 import httpx
 import backoff
-from typing import Dict, Callable, Any
+from typing import List, Dict, Callable, Any
 from httpx import Limits, Timeout
 
-def _format_request(request: Callable):
-  async def wrapper(**kwargs):
+def _format_request(request: Callable) -> Callable:
+  async def wrapper(**kwargs) -> Dict[str, Any]:
     if "data" in kwargs:
       kwargs["data"] = json.dumps(kwargs["data"])
     return await request(**kwargs)
   return wrapper
 
-def _pagination_handler(request: Callable):
-    async def wrapper(self, endpoint, method, pagination: Dict[str, Any], **kwargs):
+def _pagination_handler(request: Callable) -> Callable:
+    async def wrapper(pagination: Dict[str, Any], *args, **kwargs) -> List[Dict[str,Any]]:
         async def _offset_limit_based():
             pages = []
             exhaust = True
@@ -20,16 +20,16 @@ def _pagination_handler(request: Callable):
             limit = kwargs["params"][pagination["fields"][1]]
 
             while exhaust:
-                r = await request(self, endpoint, method, **kwargs)
-                for key in r.keys():
+                r = await request(*args, **kwargs)
+                for key in r.json().keys():
                     if key == "total":
                         continue
 
-                    if len(r[key]) == 0:
+                    if len(r.json()[key]) == 0:
                         exhaust = False
                         break
                     
-                    pages.append(r[key])
+                    pages.append(r.json()[key])
                     
                 offset += limit
                 kwargs["params"][pagination["fields"][0]] = offset ## Offset
@@ -48,15 +48,15 @@ class Proxy:
             limits=Limits(max_connections=100, max_keepalive_connections=20)
         )
 
-    @_format_request
     @_pagination_handler
+    @_format_request
     @backoff.on_exception(
         backoff.expo, 
         (httpx.RequestError, httpx.HTTPStatusError), 
         max_tries=15,
         giveup=lambda e: e.response is not None and e.response.status_code not in {429, 500, 502, 503, 504}
     )
-    async def make_request(self, endpoint: str, method: str, pagination: Dict[str, Any], **kwargs):
+    async def make_request(self, endpoint: str, method: str, pagination: Dict[str, Any] = None, **kwargs):
         try:
             r = await self.client.request(method, endpoint, **kwargs)
             r.raise_for_status()
